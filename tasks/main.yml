@@ -1,39 +1,33 @@
 ---
-
 - set_fact:
     user: |-
-      {{ user_accounts[id].login }}
+      {{ user_accounts_login[id].login }}
 
 - debug: { var: user }
 
 - name: create user
-
   user:
     name: '{{ user }}'
-    comment: '{{ user_accounts[id].name }}'
-    password: '{{ user_passwords[id].md5 }}'
+    comment: '{{ user_accounts_login[id].name }}'
+    password: '{{ user_accounts_login[id].md5_passwd }}'
     update_password: |-
       {{ update_password | default('on_create') }}
     shell: /bin/bash
     expires: '{{ expires_epoch | default(omit) }}'
 
 - name: user existp
-
   register: getent
   check_mode: False
   changed_when: False
   failed_when: getent.rc == 1 or getent.rc == 3
-
   command: getent passwd {{ user }}
 
 
 - name: user disablep
-
   register: chage
   check_mode: False
   changed_when: False
   when: getent.stdout_lines|count and expire|default(False)
-
   command: chage -l {{ user }}
 
 - set_fact:
@@ -53,36 +47,29 @@
   when: chage is not skipped and debug|default(False)
 
 - name: disable user
-
   when:    (chage is not skipped and not expire_value.find('never') != -1 and expire_date != expire|string)
         or (chage is not skipped and     expire_value.find('never') != -1)
-
   command: chage -E {{ expire }} {{ user }}
 
-
 - name: add keys
-
   no_log: True
-  with_items: '{{ user_accounts[id].ssh_keys }}'
   loop_control: { loop_var: ssh_key }
-  when: getent.stdout_lines|count
-
   authorized_key:
     user: '{{ user }}'
     key: '{{ ssh_key }}'
-
-- set_fact: { user_removed_keys_tmp: [] }
-- set_fact: { user_removed_keys_tmp: '{{ user_accounts[id].removed_ssh_keys }}' }
-  when: user_accounts[id].removed_ssh_keys is defined
-
-- name: remove keys
-
-  no_log: True
-  with_items: '{{ user_removed_keys_tmp }}'
-  loop_control: { loop_var: ssh_key }
+  with_items: '{{ user_accounts_login[id].ssh_keys }}'
   when: getent.stdout_lines|count
 
+- set_fact: { user_removed_keys_tmp: [] }
+- set_fact: { user_removed_keys_tmp: '{{ user_accounts_login[id].removed_ssh_keys }}' }
+  when: user_accounts_login[id].removed_ssh_keys is defined
+
+- name: remove ssh keys
+  no_log: True
+  loop_control: { loop_var: ssh_key }
   authorized_key:
     user: '{{ user }}'
     key: '{{ ssh_key }}'
     state: absent
+  with_items: '{{ user_removed_keys_tmp }}'
+  when: getent.stdout_lines|count
