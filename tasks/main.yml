@@ -1,75 +1,76 @@
 ---
-- set_fact:
-    user: |-
-      {{ user_accounts_login[id].login }}
+- block:
+  - set_fact:
+      user: |-
+        {{ user_accounts_login[id].login }}
 
-- debug: { var: user }
+  - debug: { var: user }
 
-- name: create user
-  user:
-    name: '{{ user }}'
-    comment: '{{ user_accounts_login[id].name }}'
-    password: '{{ user_accounts_login[id].md5_passwd }}'
-    update_password: |-
-      {{ update_password | default('on_create') }}
-    shell: /bin/bash
-    expires: '{{ expires_epoch | default(omit) }}'
+  - name: create user
+    user:
+      name: '{{ user }}'
+      comment: '{{ user_accounts_login[id].name }}'
+      password: '{{ user_accounts_login[id].md5_passwd }}'
+      update_password: |-
+        {{ update_password | default('on_create') }}
+      shell: /bin/bash
+      expires: '{{ expires_epoch | default(omit) }}'
 
-- name: user existp
-  register: getent
-  check_mode: False
-  changed_when: False
-  failed_when: getent.rc == 1 or getent.rc == 3
-  command: getent passwd {{ user }}
+  - name: user existp
+    register: getent
+    check_mode: False
+    changed_when: False
+    failed_when: getent.rc == 1 or getent.rc == 3
+    command: getent passwd {{ user }}
 
+  - name: user disablep
+    register: chage
+    check_mode: False
+    changed_when: False
+    when: getent.stdout_lines|count and expire|default(False)
+    command: chage -l {{ user }}
 
-- name: user disablep
-  register: chage
-  check_mode: False
-  changed_when: False
-  when: getent.stdout_lines|count and expire|default(False)
-  command: chage -l {{ user }}
+  - set_fact:
+      expire_value: |
+        {{ chage.stdout_lines[3].split(':')[1] }}
+    when: chage is not skipped
 
-- set_fact:
-    expire_value: |
-      {{ chage.stdout_lines[3].split(':')[1] }}
-  when: chage is not skipped
+  - debug: { var: expire_value }
+    when: chage is not skipped and debug|default(False)
 
-- debug: { var: expire_value }
-  when: chage is not skipped and debug|default(False)
+  - set_fact:
+      expire_date: |
+        {{ lookup('pipe', 'date +%F -d' + expire_value | quote) }}
+    when: chage is not skipped and not expire_value.find('never') != -1
 
-- set_fact:
-    expire_date: |
-      {{ lookup('pipe', 'date +%F -d' + expire_value | quote) }}
-  when: chage is not skipped and not expire_value.find('never') != -1
+  - debug: { var: expire_date }
+    when: chage is not skipped and debug|default(False)
 
-- debug: { var: expire_date }
-  when: chage is not skipped and debug|default(False)
+  - name: disable user
+    when:    (chage is not skipped and not expire_value.find('never') != -1 and expire_date != expire|string)
+          or (chage is not skipped and     expire_value.find('never') != -1)
+    command: chage -E {{ expire }} {{ user }}
 
-- name: disable user
-  when:    (chage is not skipped and not expire_value.find('never') != -1 and expire_date != expire|string)
-        or (chage is not skipped and     expire_value.find('never') != -1)
-  command: chage -E {{ expire }} {{ user }}
+  - name: add keys
+    no_log: True
+    loop_control: { loop_var: ssh_key }
+    authorized_key:
+      user: '{{ user }}'
+      key: '{{ ssh_key }}'
+    with_items: '{{ user_accounts_login[id].ssh_keys }}'
+    when: getent.stdout_lines|count
 
-- name: add keys
-  no_log: True
-  loop_control: { loop_var: ssh_key }
-  authorized_key:
-    user: '{{ user }}'
-    key: '{{ ssh_key }}'
-  with_items: '{{ user_accounts_login[id].ssh_keys }}'
-  when: getent.stdout_lines|count
+  - set_fact: { user_removed_keys_tmp: [] }
+  - set_fact: { user_removed_keys_tmp: '{{ user_accounts_login[id].removed_ssh_keys }}' }
+    when: user_accounts_login[id].removed_ssh_keys is defined
 
-- set_fact: { user_removed_keys_tmp: [] }
-- set_fact: { user_removed_keys_tmp: '{{ user_accounts_login[id].removed_ssh_keys }}' }
-  when: user_accounts_login[id].removed_ssh_keys is defined
-
-- name: remove ssh keys
-  no_log: True
-  loop_control: { loop_var: ssh_key }
-  authorized_key:
-    user: '{{ user }}'
-    key: '{{ ssh_key }}'
-    state: absent
-  with_items: '{{ user_removed_keys_tmp }}'
-  when: getent.stdout_lines|count
+  - name: remove ssh keys
+    no_log: True
+    loop_control: { loop_var: ssh_key }
+    authorized_key:
+      user: '{{ user }}'
+      key: '{{ ssh_key }}'
+      state: absent
+    with_items: '{{ user_removed_keys_tmp }}'
+    when: getent.stdout_lines|count
+  when: not user_accounts_login[id].terminated | default('False') | bool
