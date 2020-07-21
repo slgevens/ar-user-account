@@ -10,7 +10,7 @@
     user:
       name: '{{ user }}'
       comment: '{{ user_accounts_login[id].name }}'
-      password: '{{ user_accounts_login[id].md5_passwd }}'
+      password: '{{ user_accounts_login[id].sha512_passwd }}'
       update_password: |-
         {{ update_password | default('on_create') }}
       shell: /bin/bash
