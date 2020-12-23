@@ -54,7 +54,7 @@
   - name: add keys
     no_log: True
     loop_control: { loop_var: ssh_key }
-    authorized_key:
+    ansible.posix.authorized_key:
       user: '{{ user }}'
       key: '{{ ssh_key }}'
     with_items: '{{ user_accounts_login[id].ssh_keys }}'
